@@ -1,0 +1,11 @@
+{
+  "background_color": "#ffffff",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "ei7gtb.github",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "ei7gtb.github",
+  "start_url": "/https://ei7gtb.github.io/stepper_control/stepper_control.html",
+  "theme_color": "#ffffff"
+}
