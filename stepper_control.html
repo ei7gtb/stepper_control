@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stepper BLE Controller</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind for Inter font and basic styling -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#3b82f6', // Blue-500
+                        secondary: '#10b981', // Emerald-500
+                        background: '#f8f9fa',
+                        card: '#ffffff',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom styles for a polished look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .control-card {
+            max-width: 480px;
+            width: 100%;
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e5e7eb;
+        }
+        .action-button {
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .action-button:active {
+            transform: translateY(1px);
+            box-shadow: none;
+        }
+        /* Style the modal to be visible only when 'flex' is added */
+        #message-modal {
+            display: none; 
+        }
+        #message-modal.flex {
+            display: flex;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Main Control Panel -->
+    <div id="app" class="control-card bg-card p-6 rounded-xl space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center">BLE Stepper Control</h1>
+        <p class="text-center text-sm text-gray-500">Connect to **Heltec Stepper** to begin.</p>
+        
+        <!-- Status Display -->
+        <div class="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="flex justify-between items-center">
+                <span class="text-sm font-medium text-gray-500">Connection Status:</span>
+                <span id="ble-status" class="px-3 py-1 text-xs font-bold rounded-full bg-red-100 text-red-700">DISCONNECTED</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-sm font-medium text-gray-500">Motor State:</span>
+                <span id="motor-status" class="text-base font-semibold text-gray-800">STOPPED</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-sm font-medium text-gray-500">Current Position:</span>
+                <span id="motor-position" class="text-xl font-extrabold text-primary">0</span>
+            </div>
+        </div>
+
+        <!-- Connection Button -->
+        <button id="connect-button" onclick="handleConnect()"
+                class="w-full py-3 bg-primary text-white font-bold rounded-xl shadow-lg hover:bg-blue-600 transition action-button">
+            Connect
+        </button>
+
+        <!-- Motor Controls -->
+        <div class="space-y-4 pt-4 border-t border-gray-200" id="controls" style="display: none;">
+            
+            <h2 class="text-xl font-bold text-gray-700 text-center">Movement Parameters</h2>
+            
+            <!-- Steps Input -->
+            <div>
+                <label for="steps-input" class="block text-sm font-medium text-gray-700 mb-1">Steps (Pulses)</label>
+                <input type="number" id="steps-input" value="1600" min="1" max="10000"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                <p class="text-xs text-gray-500 mt-1">1600 steps is 1 full revolution (for a typical 200 step/rev motor with 1/8 microstepping).</p>
+            </div>
+
+            <!-- Speed Input -->
+            <div>
+                <label for="speed-input" class="block text-sm font-medium text-gray-700 mb-1">Speed (Steps/sec)</label>
+                <input type="number" id="speed-input" value="1000" min="100" max="2000"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                <p class="text-xs text-gray-500 mt-1">Recommended speed range: 100 to 2000.</p>
+            </div>
+            
+            <!-- Command Buttons -->
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="sendCommand('cw')"
+                        class="action-button py-3 bg-secondary text-white font-semibold rounded-xl shadow-md hover:bg-emerald-600 transition">
+                    <span class="text-2xl">&rarr;</span> CW
+                </button>
+                <button onclick="sendCommand('ccw')"
+                        class="action-button py-3 bg-secondary text-white font-semibold rounded-xl shadow-md hover:bg-emerald-600 transition">
+                    <span class="text-2xl">&larr;</span> CCW
+                </button>
+            </div>
+            
+            <!-- Stop Button -->
+            <button onclick="sendCommand('stop')"
+                    class="action-button w-full py-3 bg-red-500 text-white font-bold rounded-xl shadow-md hover:bg-red-600 transition">
+                STOP & RESET POS
+            </button>
+
+        </div>
+    </div>
+
+    <!-- Custom Message Box Modal -->
+    <div id="message-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 shadow-2xl max-w-sm w-full space-y-4">
+            <h3 id="modal-title" class="text-lg font-bold text-gray-900"></h3>
+            <p id="modal-message" class="text-sm text-gray-600"></p>
+            <button onclick="document.getElementById('message-modal').classList.add('hidden')"
+                    class="w-full py-2 bg-primary text-white font-semibold rounded-lg hover:bg-blue-600 transition">
+                OK
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- BLE UUIDs (MUST BE LOWERCASE for Web Bluetooth) ---
+        // I have corrected these from the uppercase version you provided.
+        const service_uuid = '4a4e5301-b1a8-41e7-8142-99079a636a00';
+        const command_characteristic_uuid = '4a4e5302-b1a8-41e7-8142-99079a636a00';
+        const status_characteristic_uuid = '4a4e5303-b1a8-41e7-8142-99079a636a00';
+
+        // --- BLE Global Variables ---
+        let bleDevice = null;
+        let commandCharacteristic = null;
+
+        // --- DOM Elements ---
+        const bleStatusEl = document.getElementById('ble-status');
+        const motorStatusEl = document.getElementById('motor-status');
+        const motorPositionEl = document.getElementById('motor-position');
+        const connectButton = document.getElementById('connect-button');
+        const controlsDiv = document.getElementById('controls');
+        const stepsInput = document.getElementById('steps-input');
+        const speedInput = document.getElementById('speed-input');
+
+        // --- Utility Functions ---
+
+        /** Shows a custom modal message (replaces alert()). */
+        function showMessageBox(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('message-modal').classList.remove('hidden');
+            document.getElementById('message-modal').classList.add('flex');
+        }
+
+        /** Updates the BLE status display element. */
+        function updateStatusDisplay(status) {
+            bleStatusEl.textContent = status;
+            if (status === 'CONNECTED') {
+                bleStatusEl.className = 'px-3 py-1 text-xs font-bold rounded-full bg-green-100 text-green-700';
+                connectButton.textContent = 'Disconnect';
+                controlsDiv.style.display = 'block';
+            } else if (status === 'DISCONNECTED') {
+                bleStatusEl.className = 'px-3 py-1 text-xs font-bold rounded-full bg-red-100 text-red-700';
+                connectButton.textContent = 'Connect';
+                controlsDiv.style.display = 'none';
+                motorStatusEl.textContent = 'STOPPED';
+                motorPositionEl.textContent = '0';
+            } else {
+                 bleStatusEl.className = 'px-3 py-1 text-xs font-bold rounded-full bg-yellow-100 text-yellow-700';
+            }
+        }
+
+        // --- BLE Connection Logic ---
+
+        async function handleConnect() {
+            // Check for secure context (Crucial for Web Bluetooth)
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+                 showMessageBox(
+                    'Security Error',
+                    'Web Bluetooth requires a **secure context** (HTTPS or localhost). Please deploy or run the file locally via a secure server to proceed.'
+                );
+                updateStatusDisplay('DISCONNECTED');
+                return;
+            }
+
+            if (bleDevice && bleDevice.gatt.connected) {
+                // Disconnect logic
+                bleDevice.gatt.disconnect();
+                updateStatusDisplay('DISCONNECTED');
+                bleDevice = null;
+                commandCharacteristic = null;
+                return;
+            }
+
+            updateStatusDisplay('SCANNING...');
+
+            try {
+                // Check if Web Bluetooth is available
+                if (!navigator.bluetooth) {
+                    throw new Error('Web Bluetooth is not supported by this browser.');
+                }
+                
+                // Request the device, filtering by name and service UUID
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    // Note: Filtering by name is optional, but filtering by service is mandatory
+                    filters: [{ name: 'Heltec Stepper' }],
+                    optionalServices: [service_uuid]
+                });
+
+                // Device disconnected event listener
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                updateStatusDisplay('CONNECTING...');
+                const server = await bleDevice.gatt.connect();
+                const service = await server.getPrimaryService(service_uuid);
+                
+                // 1. Get COMMAND (WRITE) Characteristic
+                commandCharacteristic = await service.getCharacteristic(command_characteristic_uuid);
+
+                // 2. Get STATUS (NOTIFY) Characteristic
+                const statusCharacteristic = await service.getCharacteristic(status_characteristic_uuid);
+
+                // Start listening for notifications from the ESP32
+                await statusCharacteristic.startNotifications();
+                statusCharacteristic.addEventListener('characteristicvaluechanged', handleStatusUpdate);
+
+                updateStatusDisplay('CONNECTED');
+                console.log('BLE Connection established and notifications started.');
+
+            } catch (error) {
+                const errorMessage = error.message;
+
+                if (errorMessage.includes("disallowed by permissions policy")) {
+                     showMessageBox(
+                        'Bluetooth Access Blocked',
+                        'Access to Bluetooth is disallowed. This often happens when running in an iFrame or without HTTPS. Please ensure you are using a secure connection.'
+                    );
+                } else if (error.name === 'NotFoundError' || errorMessage.includes("User cancelled")) {
+                    console.log('User cancelled device selection or device not found.');
+                } else {
+                    showMessageBox('Connection Failed', `Error: ${errorMessage}. Make sure the ESP32 is powered on and advertising with the correct name/UUIDs.`);
+                }
+                updateStatusDisplay('DISCONNECTED');
+                bleDevice = null;
+                commandCharacteristic = null;
+            }
+        }
+
+        /** Handles connection lost event. */
+        function onDisconnected(event) {
+            updateStatusDisplay('DISCONNECTED');
+            showMessageBox('Connection Lost', 'The BLE device has disconnected.');
+            bleDevice = null;
+            commandCharacteristic = null;
+        }
+
+        /** Handles incoming status notifications. */
+        function handleStatusUpdate(event) {
+            // Data received is a DataView. Convert to string.
+            const value = event.target.value;
+            const statusString = new TextDecoder().decode(value); 
+            
+            // Expected format: [motorStatus],[currentPosition] (e.g., "MOVING CW,800")
+            const parts = statusString.split(',');
+
+            if (parts.length === 2) {
+                const motorStatus = parts[0].trim();
+                const motorPosition = parts[1].trim();
+
+                motorStatusEl.textContent = motorStatus;
+                motorPositionEl.textContent = motorPosition;
+                
+                console.log(`Status Update: ${motorStatus} @ ${motorPosition}`);
+            } else {
+                console.warn('Received malformed status string:', statusString);
+            }
+        }
+
+        /** Sends command to the stepper motor. */
+        async function sendCommand(action) {
+            if (!commandCharacteristic || !bleDevice.gatt.connected) {
+                showMessageBox('Error', 'Not connected to the BLE device.');
+                return;
+            }
+            
+            let commandString;
+
+            if (action === 'stop') {
+                // Command: "stop 0 0" (Steps and speed are ignored by the server for 'stop')
+                commandString = 'stop 0 0';
+                motorStatusEl.textContent = 'STOPPING...';
+            } else if (action === 'cw' || action === 'ccw') {
+                const steps = parseInt(stepsInput.value);
+                const speed = parseInt(speedInput.value);
+
+                if (isNaN(steps) || isNaN(speed) || steps <= 0 || speed <= 0) {
+                    showMessageBox('Input Error', 'Please enter valid positive numbers for Steps and Speed.');
+                    return;
+                }
+                // Command format: "[action] [steps] [speed]" (e.g., "cw 1600 1000")
+                commandString = `${action} ${steps} ${speed}`;
+                motorStatusEl.textContent = `MOVING ${action.toUpperCase()}...`;
+            } else {
+                return;
+            }
+
+            try {
+                // Convert string to ArrayBuffer/Uint8Array
+                const encoder = new TextEncoder();
+                const data = encoder.encode(commandString);
+                
+                // Write the command without response (fastest way to send commands)
+                await commandCharacteristic.writeValueWithoutResponse(data);
+                console.log(`Sent command: ${commandString}`);
+            } catch (error) {
+                showMessageBox('Command Failed', `Could not send command: ${error.message}`);
+                console.error('Error sending command:', error);
+            }
+        }
+
+        // Initialize status on load
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStatusDisplay('DISCONNECTED');
+            // Check for Web Bluetooth support on load
+            if (!navigator.bluetooth) {
+                showMessageBox('Browser Not Supported', 'Your browser does not support Web Bluetooth. Please use Chrome, Edge, or Opera on desktop or Android.');
+                connectButton.disabled = true;
+            }
+        });
+
+    </script>
+</body>
+</html>
